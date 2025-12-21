@@ -1,0 +1,125 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: news-postgres
+    environment:
+      POSTGRES_DB: news_colcap
+      POSTGRES_USER: newsuser
+      POSTGRES_PASSWORD: newspass123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - news-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U newsuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: news-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - news-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # GDELT Collector Service
+  collector:
+    build:
+      context: ./services/collector
+      dockerfile: Dockerfile
+    container_name: news-collector
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: news_colcap
+      POSTGRES_USER: newsuser
+      POSTGRES_PASSWORD: newspass123
+      COLLECTION_INTERVAL: 21600  # 6 horas en segundos
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # Processor Service (ETL)
+  processor:
+    build:
+      context: ./services/processor
+      dockerfile: Dockerfile
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: news_colcap
+      POSTGRES_USER: newsuser
+      POSTGRES_PASSWORD: newspass123
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - news-network
+    restart: unless-stopped
+    # Para múltiples replicas, usa: docker-compose up --scale processor=2
+
+  # Analyzer Service
+  analyzer:
+    build:
+      context: ./services/analyzer
+      dockerfile: Dockerfile
+    container_name: news-analyzer
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: news_colcap
+      POSTGRES_USER: newsuser
+      POSTGRES_PASSWORD: newspass123
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - news-network
+    restart: unless-stopped
+
+  # API & Dashboard
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    container_name: news-api
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: news_colcap
+      POSTGRES_USER: newsuser
+      POSTGRES_PASSWORD: newspass123
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - news-network
+    restart: unless-stopped
+
+networks:
+  news-network:
+    driver: bridge
+
+volumes:
+  postgres_data:

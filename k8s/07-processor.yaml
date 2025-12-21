@@ -1,0 +1,62 @@
+# Processor Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor
+  namespace: news-colcap
+  labels:
+    app: processor
+spec:
+  replicas: 2  # Procesamiento paralelo
+  selector:
+    matchLabels:
+      app: processor
+  template:
+    metadata:
+      labels:
+        app: processor
+    spec:
+      containers:
+      - name: processor
+        image: newscolcap/processor:latest  # Cambiar por tu imagen
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: news-config
+        - secretRef:
+            name: news-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "700m"
+      restartPolicy: Always
+---
+# HorizontalPodAutoscaler para escalar automáticamente
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: processor-hpa
+  namespace: news-colcap
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: processor
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

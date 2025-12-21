@@ -1,0 +1,7 @@
+# Namespace para el proyecto
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: news-colcap
+  labels:
+    name: news-colcap

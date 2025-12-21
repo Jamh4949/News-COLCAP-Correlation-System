@@ -1,0 +1,35 @@
+# Collector Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: collector
+  namespace: news-colcap
+  labels:
+    app: collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: collector
+  template:
+    metadata:
+      labels:
+        app: collector
+    spec:
+      containers:
+      - name: collector
+        image: newscolcap/collector:latest  # Cambiar por tu imagen
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: news-config
+        - secretRef:
+            name: news-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      restartPolicy: Always

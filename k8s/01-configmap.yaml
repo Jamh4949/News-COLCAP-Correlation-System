@@ -1,0 +1,13 @@
+# ConfigMap con configuración compartida
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: news-config
+  namespace: news-colcap
+data:
+  POSTGRES_HOST: postgres-service
+  POSTGRES_DB: news_colcap
+  POSTGRES_USER: newsuser
+  REDIS_HOST: redis-service
+  REDIS_PORT: "6379"
+  COLLECTION_INTERVAL: "21600"  # 6 horas

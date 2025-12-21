@@ -1,0 +1,155 @@
+# PostgreSQL Deployment y Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: news-colcap
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: news-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: news-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: news-secrets
+              key: POSTGRES_PASSWORD
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: init-script
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - newsuser
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - newsuser
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+      - name: init-script
+        configMap:
+          name: postgres-init-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: news-colcap
+spec:
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+---
+# ConfigMap con script de inicialización
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-script
+  namespace: news-colcap
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS news (
+        id SERIAL PRIMARY KEY,
+        url TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT,
+        source TEXT,
+        published_date TIMESTAMP NOT NULL,
+        country VARCHAR(10),
+        sentiment_score FLOAT,
+        sentiment_label VARCHAR(20),
+        categories TEXT[],
+        keywords TEXT[],
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS colcap_data (
+        id SERIAL PRIMARY KEY,
+        date DATE UNIQUE NOT NULL,
+        open_price DECIMAL(10, 2),
+        high_price DECIMAL(10, 2),
+        low_price DECIMAL(10, 2),
+        close_price DECIMAL(10, 2),
+        volume BIGINT,
+        adj_close DECIMAL(10, 2),
+        daily_change DECIMAL(10, 4),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS correlations (
+        id SERIAL PRIMARY KEY,
+        date DATE NOT NULL,
+        news_count INTEGER,
+        avg_sentiment FLOAT,
+        colcap_change DECIMAL(10, 4),
+        correlation_coefficient FLOAT,
+        news_ids INTEGER[],
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS processing_status (
+        id SERIAL PRIMARY KEY,
+        job_id UUID UNIQUE NOT NULL,
+        service_name VARCHAR(50) NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        error_message TEXT,
+        metadata JSONB
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_news_published_date ON news(published_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_news_country ON news(country);
+    CREATE INDEX IF NOT EXISTS idx_news_sentiment ON news(sentiment_score);
+    CREATE INDEX IF NOT EXISTS idx_colcap_date ON colcap_data(date DESC);
+    CREATE INDEX IF NOT EXISTS idx_correlations_date ON correlations(date DESC);
+
+    GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO newsuser;
+    GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO newsuser;

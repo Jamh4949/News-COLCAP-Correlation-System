@@ -1,0 +1,35 @@
+# Analyzer Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analyzer
+  namespace: news-colcap
+  labels:
+    app: analyzer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analyzer
+  template:
+    metadata:
+      labels:
+        app: analyzer
+    spec:
+      containers:
+      - name: analyzer
+        image: newscolcap/analyzer:latest  # Cambiar por tu imagen
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: news-config
+        - secretRef:
+            name: news-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "700m"
+      restartPolicy: Always
