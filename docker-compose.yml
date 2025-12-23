@@ -34,7 +34,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # GDELT Collector Service
+  # GDELT Collector Service (Optimizado)
   collector:
     build:
       context: ./services/collector
@@ -47,7 +47,8 @@ services:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
-      COLLECTION_INTERVAL: 21600  # 6 horas en segundos
+      COLLECTION_INTERVAL: 21600  # 6 horas
+      GDELT_DAYS_BACK: 365  # 1 año completo de datos históricos
     depends_on:
       - redis
       - postgres

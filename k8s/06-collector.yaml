@@ -1,4 +1,4 @@
-# Collector Service Deployment
+# Collector Service Deployment (GDELT Optimizado)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -18,8 +18,13 @@ spec:
     spec:
       containers:
       - name: collector
-        image: newscolcap/collector:latest  # Cambiar por tu imagen
+        image: newscolcap/collector:latest
         imagePullPolicy: IfNotPresent
+        env:
+        - name: GDELT_DAYS_BACK
+          value: "365"
+        - name: COLLECTION_INTERVAL
+          value: "21600"
         envFrom:
         - configMapRef:
             name: news-config

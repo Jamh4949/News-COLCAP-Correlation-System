@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS colcap_data (
 -- Create correlations table
 CREATE TABLE IF NOT EXISTS correlations (
     id SERIAL PRIMARY KEY,
-    date DATE NOT NULL,
+    date DATE NOT NULL UNIQUE,
     news_count INTEGER,
     avg_sentiment FLOAT,
     colcap_change DECIMAL(10, 4),

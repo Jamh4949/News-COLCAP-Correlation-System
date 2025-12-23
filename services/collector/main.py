@@ -1,6 +1,7 @@
 """
-GDELT News Collector Service
+GDELT News Collector Service - OPTIMIZADO
 Recolecta noticias de GDELT relacionadas con Colombia y economía
+Optimizado para obtener 2,000-3,000 artículos por ejecución
 """
 
 import os
@@ -11,7 +12,6 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 import redis
 import psycopg2
-from psycopg2.extras import execute_values
 import requests
 import schedule
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class GDELTCollector:
-    """Recolector de noticias desde GDELT"""
+    """Recolector de noticias desde GDELT - Optimizado para alto volumen"""
     
     def __init__(self):
         # Configuración de Redis
@@ -42,47 +42,79 @@ class GDELTCollector:
             'password': os.getenv('POSTGRES_PASSWORD', 'newspass123')
         }
         
-        # Keywords económicos para filtrar
+        # Keywords económicos expandidos - 60+ términos para alto volumen
         self.economic_keywords = [
-            'economía', 'bolsa', 'COLCAP', 'dólar', 'peso', 'inflación',
-            'banco', 'inversión', 'mercado', 'finanzas', 'comercio',
-            'PIB', 'empresas', 'negocios', 'petróleo', 'exportaciones',
-            'acciones', 'divisas', 'tasa', 'interés', 'BVC', 'Ecopetrol',
-            'Bancolombia', 'Grupo Aval', 'ISA'
+            # Términos económicos generales
+            'colombia economía', 'colombia bolsa', 'colombia finanzas', 'colombia negocios',
+            'colombia comercio', 'colombia PIB', 'colombia inversión', 'colombia mercado',
+            'colombia exportaciones', 'colombia importaciones', 'colombia industria',
+            
+            # Índices y mercados
+            'colcap', 'BVC colombia', 'colombia acciones', 'colombia valores',
+            'colombia bursátil', 'colombia renta fija',
+            
+            # Moneda y divisas
+            'colombia peso', 'colombia dólar', 'colombia divisas', 'colombia tipo cambio',
+            'colombia devaluación', 'colombia TRM',
+            
+            # Sector bancario y financiero
+            'colombia banco', 'bancolombia', 'banco bogotá', 'davivienda',
+            'grupo aval', 'colombia crédito', 'colombia tasa interés',
+            'colombia banrep', 'banco república colombia',
+            
+            # Empresas estratégicas
+            'ecopetrol', 'avianca colombia', 'grupo éxito colombia', 'nutresa',
+            'grupo argos colombia', 'celsia colombia', 'ISA colombia',
+            'cemex colombia', 'bavaria colombia', 'corona colombia',
+            
+            # Sectores productivos
+            'colombia petróleo', 'colombia energía', 'colombia minería',
+            'colombia agricultura', 'colombia café', 'colombia flores',
+            'colombia turismo', 'colombia construcción', 'colombia manufactura',
+            'colombia tecnología', 'colombia telecomunicaciones',
+            
+            # Indicadores económicos
+            'colombia inflación', 'colombia desempleo', 'colombia crecimiento',
+            'colombia déficit', 'colombia deuda', 'colombia presupuesto',
+            'colombia balanza comercial',
+            
+            # Ciudades económicas
+            'bogotá economía', 'medellín economía', 'cali economía',
+            'barranquilla economía', 'cartagena economía',
+            
+            # Acuerdos y comercio internacional
+            'colombia TLC', 'colombia exportación', 'colombia importación'
         ]
         
-        logger.info("GDELT Collector inicializado")
+        self.days_back = int(os.getenv('GDELT_DAYS_BACK', 365))  # 1 año completo
+        self.max_records_per_query = 250
+        
+        logger.info("GDELT Collector inicializado (OPTIMIZADO)")
+        logger.info(f"Keywords: {len(self.economic_keywords)}")
+        logger.info(f"Días: {self.days_back} (1 año completo)")
+        logger.info(f"Días: {self.days_back}")
     
     def get_db_connection(self):
-        """Obtener conexión a PostgreSQL"""
         return psycopg2.connect(**self.db_config)
     
-    def fetch_gdelt_articles(self, days_back: int = 365) -> List[Dict]:
-        """
-        Obtener artículos de GDELT del último año
-        Usando la API v2 de GDELT
-        """
-        logger.info(f"Obteniendo artículos GDELT de los últimos {days_back} días")
+    def fetch_gdelt_articles(self) -> List[Dict]:
+        logger.info(f"🔍 Búsqueda GDELT ({self.days_back} días)")
         
-        # Calcular rango de fechas
         end_date = datetime.utcnow()
-        start_date = end_date - timedelta(days=days_back)
-        
-        # Formato de fecha para GDELT: YYYYMMDDHHMMSS
+        start_date = end_date - timedelta(days=self.days_back)
         start_str = start_date.strftime('%Y%m%d%H%M%S')
         end_str = end_date.strftime('%Y%m%d%H%M%S')
         
         articles = []
+        successful = 0
         
-        # Buscar por diferentes keywords económicos - usar todos los keywords
-        for keyword in self.economic_keywords:  # Usar todos los keywords (15)
+        for i, keyword in enumerate(self.economic_keywords, 1):
             try:
-                # URL de GDELT DOC 2.0 API
                 url = "https://api.gdeltproject.org/api/v2/doc/doc"
                 params = {
-                    'query': f'colombia {keyword}',
+                    'query': keyword,
                     'mode': 'artlist',
-                    'maxrecords': 250,  # Máximo permitido por GDELT
+                    'maxrecords': self.max_records_per_query,
                     'startdatetime': start_str,
                     'enddatetime': end_str,
                     'format': 'json'
@@ -93,39 +125,34 @@ class GDELTCollector:
                 if response.status_code == 200:
                     data = response.json()
                     if 'articles' in data:
+                        count = len(data['articles'])
                         articles.extend(data['articles'])
-                        logger.info(f"Obtenidos {len(data['articles'])} artículos para keyword '{keyword}'")
-                else:
-                    logger.warning(f"Error en GDELT API: {response.status_code}")
+                        successful += 1
+                        logger.info(f"  [{i}/{len(self.economic_keywords)}] '{keyword}': {count} ✓")
                 
-                # Rate limiting - esperar entre requests
-                time.sleep(1)
+                time.sleep(1.2)
                 
             except Exception as e:
-                logger.error(f"Error obteniendo artículos para '{keyword}': {str(e)}")
+                logger.error(f"  [{i}] '{keyword}': Error")
                 continue
         
-        # Eliminar duplicados por URL
-        unique_articles = {article['url']: article for article in articles}
-        logger.info(f"Total de artículos únicos: {len(unique_articles)}")
+        unique = {a.get('url'): a for a in articles if a.get('url')}
+        result = list(unique.values())
         
-        return list(unique_articles.values())
+        logger.info(f"📊 Total: {len(articles)} → Únicos: {len(result)}")
+        return result
     
     def save_to_database(self, articles: List[Dict]):
-        """Guardar artículos en PostgreSQL"""
         if not articles:
-            logger.info("No hay artículos para guardar")
             return 0
         
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        
-        saved_count = 0
+        saved = 0
         
         try:
             for article in articles:
                 try:
-                    # Parsear fecha de publicación
                     pub_date = datetime.strptime(
                         article.get('seendate', datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')),
                         '%Y%m%dT%H%M%SZ'
@@ -138,33 +165,29 @@ class GDELTCollector:
                     """, (
                         article.get('url', ''),
                         article.get('title', ''),
-                        article.get('title', ''),  # GDELT no da contenido completo
+                        article.get('title', ''),
                         article.get('domain', ''),
                         pub_date,
                         'CO'
                     ))
                     
                     if cursor.rowcount > 0:
-                        saved_count += 1
-                        
-                except Exception as e:
-                    logger.error(f"Error guardando artículo: {str(e)}")
+                        saved += 1
+                except:
                     continue
             
             conn.commit()
-            logger.info(f"Guardados {saved_count} nuevos artículos en BD")
-            
+            logger.info(f"💾 Guardados: {saved}")
         except Exception as e:
             conn.rollback()
-            logger.error(f"Error en transacción de BD: {str(e)}")
+            logger.error(f"Error BD: {e}")
         finally:
             cursor.close()
             conn.close()
         
-        return saved_count
+        return saved
     
     def queue_for_processing(self, count: int):
-        """Enviar señal a Redis para que el procesador trabaje"""
         if count > 0:
             message = {
                 'timestamp': datetime.utcnow().isoformat(),
@@ -172,46 +195,30 @@ class GDELTCollector:
                 'action': 'process_new_articles'
             }
             self.redis_client.publish('news_processing', json.dumps(message))
-            logger.info(f"Señal de procesamiento enviada a Redis")
     
     def collect(self):
-        """Ejecutar ciclo de recolección completo"""
-        logger.info("=" * 50)
-        logger.info("Iniciando ciclo de recolección")
-        logger.info("=" * 50)
+        logger.info("="*70)
+        logger.info("🚀 GDELT Collection")
+        logger.info("="*70)
         
-        start_time = time.time()
+        start = time.time()
+        articles = self.fetch_gdelt_articles()
+        saved = self.save_to_database(articles)
+        self.queue_for_processing(saved)
         
-        # 1. Obtener artículos de GDELT del último año (365 días)
-        articles = self.fetch_gdelt_articles(days_back=365)
-        
-        # 2. Guardar en base de datos
-        saved_count = self.save_to_database(articles)
-        
-        # 3. Notificar al procesador
-        self.queue_for_processing(saved_count)
-        
-        elapsed = time.time() - start_time
-        logger.info(f"Ciclo completado en {elapsed:.2f} segundos")
-        logger.info("=" * 50)
+        elapsed = time.time() - start
+        logger.info(f"✅ Completado en {int(elapsed)}s - {len(articles)} artículos, {saved} guardados")
     
     def run(self):
-        """Ejecutar servicio en loop continuo"""
-        logger.info("🚀 Iniciando GDELT Collector Service")
-        
-        # Ejecutar inmediatamente al iniciar
+        logger.info("🚀 GDELT Collector (OPTIMIZADO)")
         self.collect()
         
-        # Programar ejecuciones cada 6 horas
-        interval = int(os.getenv('COLLECTION_INTERVAL', 21600))  # 6 horas por defecto
+        interval = int(os.getenv('COLLECTION_INTERVAL', 21600))
         schedule.every(interval).seconds.do(self.collect)
         
-        logger.info(f"Programado para ejecutar cada {interval/3600} horas")
-        
-        # Loop principal
         while True:
             schedule.run_pending()
-            time.sleep(60)  # Verificar cada minuto
+            time.sleep(60)
 
 
 if __name__ == "__main__":

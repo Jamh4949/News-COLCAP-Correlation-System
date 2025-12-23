@@ -49,6 +49,7 @@ logs/
 *.sqlite
 data/*.json
 !data/.gitkeep
+!data/colcap_data_full.json
 postgres-data/
 
 # Docker

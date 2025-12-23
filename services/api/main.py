@@ -126,14 +126,31 @@ async def root():
                 </div>
             </div>
             
-            <!-- Charts -->
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Charts - 3 Gráficas principales -->
+            <div class="grid grid-cols-1 gap-6 mb-8">
+                <!-- Gráfica 1: Solo COLCAP -->
                 <div class="bg-white rounded-lg shadow p-6">
-                    <h2 class="text-xl font-semibold mb-4">Sentimiento vs COLCAP</h2>
+                    <h2 class="text-xl font-semibold mb-4">📈 Índice COLCAP - Últimos 90 días</h2>
+                    <canvas id="colcapChart"></canvas>
+                </div>
+                
+                <!-- Gráfica 2: Solo Sentimiento -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">💭 Sentimiento de Noticias - Últimos 90 días</h2>
+                    <canvas id="sentimentLineChart"></canvas>
+                </div>
+                
+                <!-- Gráfica 3: Sentimiento vs COLCAP (Comparación) -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">🔄 Comparación: Sentimiento vs COLCAP</h2>
                     <canvas id="correlationChart"></canvas>
                 </div>
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h2 class="text-xl font-semibold mb-4">Distribución de Sentimiento</h2>
+            </div>
+            
+            <!-- Distribución de Sentimiento -->
+            <div class="bg-white rounded-lg shadow p-6 mb-8">
+                <h2 class="text-xl font-semibold mb-4">📊 Distribución de Sentimiento</h2>
+                <div class="max-w-md mx-auto">
                     <canvas id="sentimentChart"></canvas>
                 </div>
             </div>
@@ -166,8 +183,10 @@ async def root():
                     document.getElementById('colcap-change').textContent = stats.latest_colcap_change.toFixed(2) + '%';
                     document.getElementById('correlation').textContent = stats.correlation.toFixed(3);
                     
-                    // Cargar correlaciones
-                    const correlations = await fetch('/api/correlations?days=30').then(r => r.json());
+                    // Cargar correlaciones (últimos 90 días o todas las disponibles)
+                    const correlations = await fetch('/api/correlations?days=90').then(r => r.json());
+                    drawCOLCAPChart(correlations);
+                    drawSentimentLineChart(correlations);
                     drawCorrelationChart(correlations);
                     
                     // Cargar noticias recientes
@@ -187,11 +206,71 @@ async def root():
                 }
             }
             
+            function drawCOLCAPChart(data) {
+                const ctx = document.getElementById('colcapChart').getContext('2d');
+                
+                // Invertir el orden de los datos para que las fechas antiguas estén a la izquierda
+                const reversedData = [...data].reverse();
+                
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: reversedData.map(d => d.date),
+                        datasets: [{
+                            label: 'COLCAP Cambio %',
+                            data: reversedData.map(d => d.colcap_change),
+                            borderColor: 'rgb(168, 85, 247)',
+                            backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                title: { display: true, text: 'Cambio Porcentual (%)' }
+                            }
+                        }
+                    }
+                });
+            }
+            
+            function drawSentimentLineChart(data) {
+                const ctx = document.getElementById('sentimentLineChart').getContext('2d');
+                
+                // Invertir el orden de los datos para que las fechas antiguas estén a la izquierda
+                const reversedData = [...data].reverse();
+                
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: reversedData.map(d => d.date),
+                        datasets: [{
+                            label: 'Sentimiento Promedio',
+                            data: reversedData.map(d => d.avg_sentiment),
+                            borderColor: 'rgb(59, 130, 246)',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                title: { display: true, text: 'Sentimiento' },
+                                min: -0.3,
+                                max: 1.0
+                            }
+                        }
+                    }
+                });
+            }
+            
             function drawCorrelationChart(data) {
                 const ctx = document.getElementById('correlationChart').getContext('2d');
                 
                 // Invertir el orden de los datos para que las fechas antiguas estén a la izquierda
-                const reversedData = data.reverse();
+                const reversedData = [...data].reverse();
                 
                 new Chart(ctx, {
                     type: 'line',
@@ -219,8 +298,8 @@ async def root():
                                 type: 'linear',
                                 position: 'left',
                                 title: { display: true, text: 'Sentimiento' },
-                                min: -0.25,
-                                max: 0.45
+                                min: -0.3,
+                                max: 1.0
                             },
                             y1: {
                                 type: 'linear',
@@ -479,8 +558,8 @@ async def get_latest_colcap(days: int = Query(default=30, le=365)):
 
 
 @app.get("/api/correlations", response_model=List[CorrelationData])
-async def get_correlations(days: int = Query(default=30, le=365)):
-    """Obtener datos de correlación"""
+async def get_correlations(days: int = Query(default=365, le=365)):
+    """Obtener datos de correlación (último año completo)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     

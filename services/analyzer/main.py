@@ -365,8 +365,8 @@ class COLCAPAnalyzer:
                 logger.error("No hay datos del COLCAP (ni en Yahoo ni en BD)")
                 return
         
-        # 2. Obtener sentimiento de noticias
-        news_df = self.get_daily_news_sentiment(days_back=90)
+        # 2. Obtener sentimiento de noticias (todos los días disponibles)
+        news_df = self.get_daily_news_sentiment(days_back=365)
         if news_df.empty:
             logger.warning("No hay datos de noticias para analizar")
             return
