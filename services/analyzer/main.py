@@ -301,49 +301,69 @@ class COLCAPAnalyzer:
     
     def get_colcap_from_db(self, days_back: int = 90) -> pd.DataFrame:
         """Obtener datos COLCAP existentes de la base de datos"""
-        logger.info(f"Obteniendo datos COLCAP de la BD (últimos {days_back} días)")
-        
+        logger.info("🔍 [DEBUG] Entrando a get_colcap_from_db")
+        logger.info(f"📅 Solicitando datos COLCAP de los últimos {days_back} días")
+    
         conn = self.get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        
+    
         try:
-            cursor.execute("""
-                SELECT date, open_price, high_price, low_price, 
-                       close_price, volume, daily_change
-                FROM colcap_data
-                ORDER BY date DESC
-                LIMIT %s
-            """, (days_back,))
-            
+            query = """
+                SELECT
+                    date,
+                    close
+                FROM colcap_prices
+                WHERE date >= CURRENT_DATE - INTERVAL '%s days'
+                ORDER BY date ASC
+            """
+    
+            logger.info("🧠 [DEBUG] Ejecutando query COLCAP")
+            cursor.execute(query, (days_back,))
             rows = cursor.fetchall()
-            
+    
+            logger.info(f"📦 [DEBUG] Filas obtenidas desde BD: {len(rows)}")
+    
             if not rows:
-                logger.warning("No hay datos COLCAP en la BD")
+                logger.warning("⚠️ No hay datos COLCAP en la BD para el rango solicitado")
                 return pd.DataFrame()
-            
+    
             # Convertir a DataFrame
             df = pd.DataFrame(rows)
+    
+            logger.info(f"🧪 [DEBUG] Columnas crudas desde BD: {list(df.columns)}")
+    
             df['date'] = pd.to_datetime(df['date'])
             df.set_index('date', inplace=True)
-            df.rename(columns={
-                'open_price': 'Open',
-                'high_price': 'High', 
-                'low_price': 'Low',
-                'close_price': 'Close',
-                'volume': 'Volume',
-                'daily_change': 'Daily_Change'
-            }, inplace=True)
-            
-            # Convertir tipos numéricos explícitamente
-            for col in ['Open', 'High', 'Low', 'Close', 'Daily_Change']:
-                df[col] = df[col].astype(float)
-            
-            logger.info(f"✅ Cargados {len(df)} registros COLCAP desde BD")
+    
+            df.rename(columns={'close': 'Close'}, inplace=True)
+    
+            # Calcular variación diaria
+            df['Daily_Change'] = df['Close'].pct_change() * 100
+    
+            # Asegurar orden temporal
+            df = df.sort_index()
+    
+            # Conversión explícita de tipos
+            df['Close'] = df['Close'].astype(float)
+            df['Daily_Change'] = df['Daily_Change'].astype(float)
+    
+            logger.info(
+                f"✅ Cargados {len(df)} registros COLCAP desde BD "
+                f"(desde {df.index.min().date()} hasta {df.index.max().date()})"
+            )
+    
+            logger.info("🔍 [DEBUG] Saliendo de get_colcap_from_db correctamente")
             return df
-            
+    
+        except Exception as e:
+            logger.exception("❌ Error obteniendo datos COLCAP desde BD")
+            return pd.DataFrame()
+    
         finally:
             cursor.close()
             conn.close()
+            logger.info("🔌 [DEBUG] Conexión a BD cerrada")
+
     
     def run_analysis(self):
         """Ejecutar análisis completo"""
@@ -371,7 +391,13 @@ class COLCAPAnalyzer:
             logger.warning("No hay datos de noticias para analizar")
             return
         
-        logger.info(f"Datos para análisis: {len(news_df)} días de noticias, {len(colcap_df)} días COLCAP")
+        # Alinear COLCAP al rango temporal de noticias
+        
+        logger.info(
+            f"Datos para análisis (alineados): "
+            f"{len(news_df)} días de noticias, {len(colcap_df)} días COLCAP"
+        )
+
         
         # 3. Calcular correlación general
         correlation_stats = self.calculate_correlation(news_df, colcap_df)
