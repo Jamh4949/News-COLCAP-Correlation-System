@@ -920,9 +920,9 @@ class NewsProcessor:
 
         processed = []
 
-        with ProcessPoolExecutor(
-            max_workers=max(2, multiprocessing.cpu_count() - 1)
-        ) as executor:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=6) as executor:
             futures = [
                 executor.submit(self.process_article, dict(article))
                 for article in articles
@@ -933,7 +933,7 @@ class NewsProcessor:
                 if result:
                     processed.append(result)
 
-        # DB writes SECUENCIAL o batch
+        # Escrituras a BD (secuencial / seguro)
         for data in processed:
             self.update_article(data)
 
@@ -941,6 +941,7 @@ class NewsProcessor:
             self.notify_analyzer()
 
         return len(processed)
+
 
     def notify_analyzer(self):
         """Notificar al servicio de análisis"""
