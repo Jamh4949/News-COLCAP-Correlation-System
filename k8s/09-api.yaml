@@ -17,35 +17,47 @@ spec:
         app: api
     spec:
       containers:
-      - name: api
-        image: newscolcap/api:latest  # Cambiar por tu imagen
-        imagePullPolicy: IfNotPresent
-        ports:
-        - containerPort: 8000
-        envFrom:
-        - configMapRef:
-            name: news-config
-        - secretRef:
-            name: news-secrets
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "200m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /api/health
-            port: 8000
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /api/health
-            port: 8000
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: api
+          image: news-colcap/api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: news-config
+            - secretRef:
+                name: news-secrets
+          resources:
+            requests:
+              memory: "512Mi" # Aumentado de 256Mi
+              cpu: "200m"
+            limits:
+              memory: "1Gi" # Aumentado de 512Mi a 1GB
+              cpu: "1000m" # Aumentado de 500m
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 60 # Aumentado de 30s
+            periodSeconds: 15 # Aumentado de 10s
+            timeoutSeconds: 5 # Agregado: timeout de 5s
+            failureThreshold: 5 # Agregado: más intentos antes de reiniciar
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 30 # Aumentado de 10s
+            periodSeconds: 10 # Aumentado de 5s
+            timeoutSeconds: 5 # Agregado: timeout de 5s
+            failureThreshold: 3 # Agregado: más intentos
+          startupProbe: # NUEVO: Probe para el startup inicial
+            httpGet:
+              path: /api/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 30 # 30 intentos = 5 minutos max
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -57,10 +69,10 @@ spec:
   selector:
     app: api
   ports:
-  - port: 8000
-    targetPort: 8000
-    protocol: TCP
-  type: LoadBalancer  # Para Oracle Cloud, cambiará a NodePort si no hay LB
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: LoadBalancer
 ---
 # HorizontalPodAutoscaler para la API
 apiVersion: autoscaling/v2
@@ -76,9 +88,15 @@ spec:
   minReplicas: 2
   maxReplicas: 4
   metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80

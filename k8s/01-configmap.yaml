@@ -10,4 +10,4 @@ data:
   POSTGRES_USER: newsuser
   REDIS_HOST: redis-service
   REDIS_PORT: "6379"
-  COLLECTION_INTERVAL: "21600"  # 6 horas
+  COLLECTION_INTERVAL: "21600" # 6 horas

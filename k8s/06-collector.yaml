@@ -17,24 +17,24 @@ spec:
         app: collector
     spec:
       containers:
-      - name: collector
-        image: newscolcap/collector:latest
-        imagePullPolicy: IfNotPresent
-        env:
-        - name: GDELT_DAYS_BACK
-          value: "365"
-        - name: COLLECTION_INTERVAL
-          value: "21600"
-        envFrom:
-        - configMapRef:
-            name: news-config
-        - secretRef:
-            name: news-secrets
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "200m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
+        - name: collector
+          image: news-colcap/collector:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: GDELT_DAYS_BACK
+              value: "365"
+            - name: COLLECTION_INTERVAL
+              value: "21600"
+          envFrom:
+            - configMapRef:
+                name: news-config
+            - secretRef:
+                name: news-secrets
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "200m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
       restartPolicy: Always

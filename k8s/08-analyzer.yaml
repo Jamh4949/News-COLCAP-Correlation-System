@@ -16,20 +16,21 @@ spec:
       labels:
         app: analyzer
     spec:
+      dnsPolicy: ClusterFirst
       containers:
-      - name: analyzer
-        image: newscolcap/analyzer:latest  # Cambiar por tu imagen
-        imagePullPolicy: IfNotPresent
-        envFrom:
-        - configMapRef:
-            name: news-config
-        - secretRef:
-            name: news-secrets
-        resources:
-          requests:
-            memory: "512Mi"
-            cpu: "300m"
-          limits:
-            memory: "1Gi"
-            cpu: "700m"
+        - name: analyzer
+          image: news-colcap/analyzer:latest # Cambiar por tu imagen
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: news-config
+            - secretRef:
+                name: news-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "300m"
+            limits:
+              memory: "1Gi"
+              cpu: "700m"
       restartPolicy: Always

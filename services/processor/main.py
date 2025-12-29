@@ -3,22 +3,23 @@ News Processor Service
 Procesa y analiza el contenido de las noticias
 """
 
-import os
 import json
 import logging
-import time
-import re
-import unicodedata
 import multiprocessing
-import redis
-import psycopg2
-import nltk
+import os
+import re
+import time
+import unicodedata
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
+
+import nltk
+import psycopg2
+import redis
+from nltk.sentiment import SentimentIntensityAnalyzer
 from psycopg2.extras import RealDictCursor
 from textblob import TextBlob
-from nltk.sentiment import SentimentIntensityAnalyzer
 
 # Configurar logging
 logging.basicConfig(
@@ -41,7 +42,7 @@ class NewsProcessor:
         # Configuración de PostgreSQL
         self.db_config = {
             "host": os.getenv("POSTGRES_HOST", "localhost"),
-            "database": os.getenv("POSTGRES_DB", "news_colcap"),
+            "dbname": os.getenv("POSTGRES_DB", "news_colcap"),
             "user": os.getenv("POSTGRES_USER", "newsuser"),
             "password": os.getenv("POSTGRES_PASSWORD", "newspass123"),
         }
@@ -125,9 +126,27 @@ class NewsProcessor:
         normalized_words = [lemmatization_rules.get(w, w) for w in words]
         return " ".join(normalized_words)
 
-    def get_db_connection(self):
-        """Obtener conexión a PostgreSQL"""
-        return psycopg2.connect(**self.db_config)
+    def get_db_connection(self, max_retries=20, delay=2):
+        db_config = {
+            "host": "postgres",
+            "port": 5432,
+            "database": os.environ["POSTGRES_DB"],
+            "user": os.environ["POSTGRES_USER"],
+            "password": os.environ["POSTGRES_PASSWORD"],
+        }
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                conn = psycopg2.connect(**db_config)
+                print(f"✅ Conectado a Postgres en el intento {attempt}")
+                return conn
+            except psycopg2.OperationalError as e:
+                print(f"⏳ Intento {attempt}/{max_retries} fallido: {e}")
+                time.sleep(delay)
+
+        raise RuntimeError(
+            "❌ No se pudo conectar a Postgres después de varios intentos"
+        )
 
     def analyze_sentiment(self, text: str) -> Tuple[float, str]:
         """
@@ -941,7 +960,6 @@ class NewsProcessor:
             self.notify_analyzer()
 
         return len(processed)
-
 
     def notify_analyzer(self):
         """Notificar al servicio de análisis"""
