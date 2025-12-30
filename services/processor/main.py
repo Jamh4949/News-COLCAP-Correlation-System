@@ -41,7 +41,7 @@ class NewsProcessor:
 
         # Configuración de PostgreSQL
         self.db_config = {
-            "host": os.getenv("POSTGRES_HOST", "localhost"),
+            "host": os.getenv("POSTGRES_HOST", "postgres-service"),
             "dbname": os.getenv("POSTGRES_DB", "news_colcap"),
             "user": os.getenv("POSTGRES_USER", "newsuser"),
             "password": os.getenv("POSTGRES_PASSWORD", "newspass123"),

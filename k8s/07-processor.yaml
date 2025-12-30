@@ -19,16 +19,15 @@ spec:
       initContainers:
         - name: wait-for-postgres
           image: busybox
-          command:
-            - sh
-            - -c
+          command: ["sh", "-c"]
+          args:
             - |
-              echo "⏳ Esperando DNS de postgres-service..."
-              until nslookup postgres-service; do
-                echo "DNS no disponible, esperando 2s..."
+              echo "⏳ Esperando Postgres..."
+              until nc -z -v -w30 postgres-service 5432; do
+                echo "Postgres no disponible, esperando 2s..."
                 sleep 2
               done
-              echo "✅ DNS disponible, iniciando contenedor principal"
+              echo "✅ Postgres disponible, iniciando contenedor principal"
       containers:
         - name: processor
           image: news-colcap/processor:latest
@@ -40,11 +39,11 @@ spec:
                 name: news-secrets
           resources:
             requests:
-              memory: "512Mi"
-              cpu: "300m"
+              memory: "256Mi"
+              cpu: "200m"
             limits:
-              memory: "1Gi"
-              cpu: "700m"
+              memory: "512Mi"
+              cpu: "500m"
       restartPolicy: Always
 ---
 # HorizontalPodAutoscaler para escalar automáticamente

@@ -323,12 +323,12 @@ class COLCAPAnalyzer:
         try:
             cursor.execute(
                 """
-                SELECT date, open_price, high_price, low_price,
-                       close_price, volume, daily_change
-                FROM colcap_data
-                ORDER BY date DESC
-                LIMIT %s
-            """,
+                    SELECT date, open_price, high_price, low_price,
+                           close_price, volume, daily_change
+                    FROM colcap_data
+                    ORDER BY date DESC
+                    LIMIT %s
+                """,
                 (days_back,),
             )
 
