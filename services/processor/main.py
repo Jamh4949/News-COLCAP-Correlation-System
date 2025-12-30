@@ -7,16 +7,14 @@ import os
 import json
 import logging
 import time
-import re
 import unicodedata
 import multiprocessing
 import redis
 import psycopg2
-import nltk
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 from textblob import TextBlob
 from nltk.sentiment import SentimentIntensityAnalyzer
 
@@ -913,32 +911,79 @@ class NewsProcessor:
             conn.close()
 
     def process_batch(self):
-        """Procesar lote de artículos"""
+        """Procesa un lote de artículos"""
+
         articles = self.get_unprocessed_articles(limit=50)
         if not articles:
             return 0
 
         processed = []
 
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        with ProcessPoolExecutor(
+            max_workers=max(2, multiprocessing.cpu_count() - 1)
+        ) as executor:
+            # Enviar trabajos al pool
             futures = [
                 executor.submit(self.process_article, dict(article))
                 for article in articles
             ]
 
-            for f in as_completed(futures):
-                result = f.result()
+            # Recolectar resultados a medida que terminan
+            for future in as_completed(futures):
+                result = future.result()
                 if result:
                     processed.append(result)
 
-        # Escrituras a BD (secuencial / seguro)
-        for data in processed:
-            self.update_article(data)
+        if not processed:
+            return 0
 
-        if processed:
-            self.notify_analyzer()
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+
+        try:
+            rows = [
+                (
+                    p["sentiment_score"],
+                    p["sentiment_label"],
+                    p["categories"],
+                    p["keywords"],
+                    p["id"],
+                )
+                for p in processed
+            ]
+
+            query = """
+                UPDATE news AS n SET
+                    sentiment_score = v.sentiment_score,
+                    sentiment_label = v.sentiment_label,
+                    categories = v.categories,
+                    keywords = v.keywords,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM (
+                    VALUES %s
+                ) AS v(
+                    sentiment_score,
+                    sentiment_label,
+                    categories,
+                    keywords,
+                    id
+                )
+                WHERE n.id = v.id
+            """
+
+            execute_values(cursor, query, rows, page_size=100)
+
+            conn.commit()
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error en batch update: {str(e)}")
+
+        finally:
+            cursor.close()
+            conn.close()
+
+        self.notify_analyzer()
 
         return len(processed)
 
