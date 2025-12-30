@@ -3,17 +3,18 @@ Analysis Service
 Analiza correlaciones entre noticias y el índice COLCAP
 """
 
-import os
 import json
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict
-import redis
-import psycopg2
-from psycopg2.extras import RealDictCursor, execute_values
-import yfinance as yf
+
 import pandas as pd
+import psycopg2
+import redis
+import yfinance as yf
+from psycopg2.extras import RealDictCursor, execute_values
 from scipy import stats
 
 # Configurar logging
@@ -161,7 +162,7 @@ class COLCAPAnalyzer:
 
             cursor.execute(
                 """
-                SELECT 
+                SELECT
                     DATE(published_date) as date,
                     COUNT(*) as news_count,
                     AVG(sentiment_score) as avg_sentiment,
@@ -170,7 +171,7 @@ class COLCAPAnalyzer:
                     COUNT(CASE WHEN sentiment_label = 'negative' THEN 1 END) as negative_count,
                     ARRAY_AGG(id) as news_ids
                 FROM news
-                WHERE published_date >= %s 
+                WHERE published_date >= %s
                   AND published_date <= %s
                   AND sentiment_score IS NOT NULL
                 GROUP BY DATE(published_date)
