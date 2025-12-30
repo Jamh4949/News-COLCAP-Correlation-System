@@ -987,6 +987,7 @@ class NewsProcessor:
 
         return len(processed)
 
+
     def notify_analyzer(self):
         """Notificar al servicio de análisis"""
         message = {"timestamp": datetime.utcnow().isoformat(), "action": "run_analysis"}

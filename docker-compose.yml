@@ -1,5 +1,7 @@
+version: "3.9"
+
 services:
-  # PostgreSQL Database
+
   postgres:
     image: postgres:15-alpine
     container_name: news-postgres
@@ -20,7 +22,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # Redis Cache & Queue
   redis:
     image: redis:7-alpine
     container_name: news-redis
@@ -34,7 +35,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # GDELT Collector Service (Optimizado)
   collector:
     build:
       context: ./services/collector
@@ -47,20 +47,22 @@ services:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
-      COLLECTION_INTERVAL: 21600  # 6 horas
-      GDELT_DAYS_BACK: 365  # 1 año completo de datos históricos
+      COLLECTION_INTERVAL: 21600
+      GDELT_DAYS_BACK: 365
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - news-network
     restart: unless-stopped
 
-  # Processor Service (ETL)
   processor:
     build:
       context: ./services/processor
       dockerfile: Dockerfile
+    container_name: news-processor
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -69,14 +71,14 @@ services:
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - news-network
     restart: unless-stopped
-    # Para múltiples replicas, usa: docker-compose up --scale processor=2
 
-  # Analyzer Service
   analyzer:
     build:
       context: ./services/analyzer
@@ -89,14 +91,17 @@ services:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
+    volumes:
+      - ./data:/data
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - news-network
     restart: unless-stopped
 
-  # API & Dashboard
   api:
     build:
       context: ./services/api
@@ -112,8 +117,10 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - news-network
     restart: unless-stopped

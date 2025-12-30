@@ -359,7 +359,7 @@ class COLCAPAnalyzer:
                 f"✅ Cargados {len(df)} registros COLCAP desde BD "
                 f"(desde {df.index.min().date()} hasta {df.index.max().date()})"
             )
-
+            
             logger.info("🔍 [DEBUG] Saliendo de get_colcap_from_db correctamente")
             return df
 
