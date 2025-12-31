@@ -11,7 +11,7 @@ import unicodedata
 import multiprocessing
 import redis
 import psycopg2
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple
 from psycopg2.extras import RealDictCursor, execute_values
@@ -919,9 +919,7 @@ class NewsProcessor:
 
         processed = []
 
-        with ProcessPoolExecutor(
-            max_workers=max(2, multiprocessing.cpu_count() - 1)
-        ) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor::
             # Enviar trabajos al pool
             futures = [
                 executor.submit(self.process_article, dict(article))

@@ -197,17 +197,24 @@ class GDELTCollector:
             rows = []
 
             for a in articles:
+                # Parsear fecha de publicación (seendate) de forma segura
+                seendate = a.get("seendate")
+                if seendate:
+                    try:
+                        pub_date = datetime.strptime(seendate, "%Y%m%dT%H%M%SZ")
+                    except ValueError:
+                        pub_date = datetime.utcnow()
+                else:
+                    pub_date = datetime.utcnow()
+
                 rows.append(
                     (
                         a.get("url"),
                         a.get("title"),
-                        a.get("source"),
-                        a.get("seendate"),
-                        a.get("domain"),
-                        a.get("language"),
-                        a.get("country"),
-                        a.get("sentiment_score"),
-                        a.get("sentiment_label"),
+                        a.get("title"),   # content (puedes cambiarlo si tienes cuerpo real)
+                        a.get("domain"),  # source
+                        pub_date,
+                        "CO",
                     )
                 )
 
@@ -215,28 +222,29 @@ class GDELTCollector:
                 INSERT INTO news (
                     url,
                     title,
+                    content,
                     source,
-                    seendate,
-                    domain,
-                    language,
-                    country,
-                    sentiment_score,
-                    sentiment_label
+                    published_date,
+                    country
                 )
                 VALUES %s
                 ON CONFLICT (url) DO NOTHING
             """
 
             execute_values(cursor, query, rows, page_size=1000)
-
             conn.commit()
 
             return len(rows)
 
+        except Exception:
+            conn.rollback()
+            raise
+
         finally:
             cursor.close()
-            conn.close()
+        conn.close()
 
+   
     def queue_for_processing(self, count: int):
         if count > 0:
             message = {
