@@ -197,17 +197,18 @@ class GDELTCollector:
             rows = []
 
             for a in articles:
+                pub_date = datetime.strptime(
+                    a.get("seendate", datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")),
+                    "%Y%m%dT%H%M%SZ",
+                )
                 rows.append(
                     (
                         a.get("url"),
                         a.get("title"),
-                        a.get("source"),
-                        a.get("seendate"),
+                        a.get("title"),
                         a.get("domain"),
-                        a.get("language"),
-                        a.get("country"),
-                        a.get("sentiment_score"),
-                        a.get("sentiment_label"),
+                        pub_date,
+                        "CO",
                     )
                 )
 
@@ -215,13 +216,10 @@ class GDELTCollector:
                 INSERT INTO news (
                     url,
                     title,
+                    content,
                     source,
-                    seendate,
-                    domain,
-                    language,
-                    country,
-                    sentiment_score,
-                    sentiment_label
+                    published_date,
+                    country
                 )
                 VALUES %s
                 ON CONFLICT (url) DO NOTHING
