@@ -1,4 +1,4 @@
-# Analyzer Service Deployment - Con ThreadPoolExecutor
+# Analyzer Service Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
