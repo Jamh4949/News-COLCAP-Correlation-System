@@ -377,7 +377,6 @@ class COLCAPAnalyzer:
         
         start_time = time.time()
         
-        # 1. Usar ThreadPoolExecutor para operaciones I/O en paralelo
         # Fetch COLCAP y News sentiment simultáneamente
         with ThreadPoolExecutor(max_workers=3) as executor:
             # Lanzar tareas I/O en paralelo
@@ -404,14 +403,14 @@ class COLCAPAnalyzer:
             # Guardar datos nuevos de Yahoo Finance
             self.save_colcap_data(colcap_df)
         
-        # 2. Verificar datos de noticias
+        # Verificar datos de noticias
         if news_df.empty:
             logger.warning("No hay datos de noticias para analizar")
             return
         
         logger.info(f"Datos para análisis: {len(news_df)} días de noticias, {len(colcap_df)} días COLCAP")
         
-        # 3. Calcular correlación y guardar en paralelo
+        # Calcular correlación y guardar en paralelo
         with ThreadPoolExecutor(max_workers=2) as executor:
             future_corr = executor.submit(self.calculate_correlation, news_df, colcap_df)
             future_save = executor.submit(self.save_correlations, news_df, colcap_df)
