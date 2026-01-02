@@ -1,6 +1,4 @@
 # Configuración de Prometheus para observabilidad del sistema
-# Este archivo configura el scraping de métricas de los servicios
-
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -53,7 +51,7 @@ data:
             action: replace
             target_label: kubernetes_pod_name
 ---
-# Deployment de Prometheus (opcional - para observabilidad avanzada)
+# Deployment de Prometheus (opcional)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
