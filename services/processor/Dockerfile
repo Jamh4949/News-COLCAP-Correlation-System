@@ -19,4 +19,4 @@ RUN python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); 
 COPY . .
 
 # Run the processor service
-CMD ["python", "main.py"]
+CMD ["sh", "-c", "sleep 20 && python main.py"]

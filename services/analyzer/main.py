@@ -17,6 +17,7 @@ import pandas as pd
 import psycopg2
 import redis
 import yfinance as yf
+from psycopg2 import OperationalError
 from psycopg2.extras import RealDictCursor, execute_values
 from scipy import stats
 
@@ -52,9 +53,15 @@ class COLCAPAnalyzer:
 
         logger.info("COLCAP Analyzer inicializado")
 
-    def get_db_connection(self):
-        """Obtener conexión a PostgreSQL"""
-        return psycopg2.connect(**self.db_config)
+    def get_db_connection(self, retries=10, delay=5):
+        for i in range(retries):
+            try:
+                return psycopg2.connect(**self.db_config)
+            except OperationalError as e:
+                print(f"[DB] Postgres not ready ({i + 1}/{retries}): {e}")
+                time.sleep(delay)
+
+        raise Exception("PostgreSQL not available after retries")
 
     def fetch_colcap_data(self, days_back: int = 90) -> pd.DataFrame:
         """Obtener datos históricos del COLCAP desde Yahoo Finance"""

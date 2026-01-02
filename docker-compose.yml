@@ -1,19 +1,24 @@
+version: "3.9"
+
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:15-alpine
-    container_name: news-postgres
+    image: news-colcap/postgres:15
     environment:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - news-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U newsuser"]
       interval: 10s
@@ -23,23 +28,21 @@ services:
   # Redis Cache & Queue
   redis:
     image: redis:7-alpine
-    container_name: news-redis
-    ports:
-      - "6379:6379"
     networks:
       - news-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # GDELT Collector Service (Optimizado)
+  # GDELT Collector Service
   collector:
-    build:
-      context: ./services/collector
-      dockerfile: Dockerfile
-    container_name: news-collector
+    image: news-colcap/collector:latest
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -47,20 +50,18 @@ services:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
-      COLLECTION_INTERVAL: 21600  # 6 horas
-      GDELT_DAYS_BACK: 365  # 1 año completo de datos históricos
-    depends_on:
-      - redis
-      - postgres
+      COLLECTION_INTERVAL: 21600
+      GDELT_DAYS_BACK: 365
     networks:
       - news-network
-    restart: unless-stopped
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
 
-  # Processor Service (ETL)
+  # Processor Service
   processor:
-    build:
-      context: ./services/processor
-      dockerfile: Dockerfile
+    image: news-colcap/processor:latest
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -68,20 +69,16 @@ services:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
-    depends_on:
-      - redis
-      - postgres
     networks:
       - news-network
-    restart: unless-stopped
-    # Para múltiples replicas, usa: docker-compose up --scale processor=2
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
 
   # Analyzer Service
   analyzer:
-    build:
-      context: ./services/analyzer
-      dockerfile: Dockerfile
-    container_name: news-analyzer
+    image: news-colcap/analyzer:latest
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -89,19 +86,16 @@ services:
       POSTGRES_DB: news_colcap
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
-    depends_on:
-      - redis
-      - postgres
     networks:
       - news-network
-    restart: unless-stopped
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
 
   # API & Dashboard
   api:
-    build:
-      context: ./services/api
-      dockerfile: Dockerfile
-    container_name: news-api
+    image: news-colcap/api:latest
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -110,17 +104,22 @@ services:
       POSTGRES_USER: newsuser
       POSTGRES_PASSWORD: newspass123
     ports:
-      - "8000:8000"
-    depends_on:
-      - redis
-      - postgres
+      - target: 8000
+        published: 8000
+        protocol: tcp
+        mode: ingress
     networks:
       - news-network
-    restart: unless-stopped
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
 
 networks:
   news-network:
-    driver: bridge
+    driver: overlay
+    attachable: true
 
 volumes:
   postgres_data:
+    driver: local
