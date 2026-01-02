@@ -53,7 +53,7 @@ python .\ejecutar_noticias_local.py
 ## Servicios
 
 ### 1. Collector Service
-- Recolecta noticias de GDELT cada 6 horas
+- Recolecta noticias de GDELT
 - Filtra noticias relacionadas con Colombia
 
 ### 2. Processor Service
