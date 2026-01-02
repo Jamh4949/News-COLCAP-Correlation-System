@@ -14,7 +14,7 @@ import multiprocessing
 import redis
 import psycopg2
 import nltk
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple
 from psycopg2.extras import RealDictCursor, execute_values
