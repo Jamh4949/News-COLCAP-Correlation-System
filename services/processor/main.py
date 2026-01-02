@@ -14,7 +14,7 @@ import multiprocessing
 import redis
 import psycopg2
 import nltk
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import List, Dict, Tuple
 from psycopg2.extras import RealDictCursor, execute_values
@@ -984,8 +984,6 @@ class NewsProcessor:
         
         logger.info(f"⚡ Procesando {len(articles)} artículos con {num_workers} threads...")
 
-        # Usar ThreadPoolExecutor en lugar de ProcessPoolExecutor
-        # ThreadPool es mejor para operaciones I/O bound y no tiene problemas de serialización
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [
                 executor.submit(self.process_article, dict(article))
@@ -1000,7 +998,6 @@ class NewsProcessor:
                 except Exception as e:
                     logger.error(f"Error en thread: {str(e)}")
 
-        # BATCH UPDATE en lugar de updates individuales
         if processed:
             self.batch_update_articles(processed)
             self.notify_analyzer()
