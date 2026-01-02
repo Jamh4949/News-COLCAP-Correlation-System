@@ -4,22 +4,23 @@ Procesa y analiza el contenido de las noticias
 Con procesamiento paralelo y batch updates para alto rendimiento
 """
 
-import os
 import json
 import logging
-import time
-import re
-import unicodedata
 import multiprocessing
-import redis
-import psycopg2
-import nltk
+import os
+import re
+import time
+import unicodedata
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
+
+import nltk
+import psycopg2
+import redis
+from nltk.sentiment import SentimentIntensityAnalyzer
 from psycopg2.extras import RealDictCursor, execute_values
 from textblob import TextBlob
-from nltk.sentiment import SentimentIntensityAnalyzer
 
 # Configurar logging
 logging.basicConfig(
@@ -41,10 +42,11 @@ class NewsProcessor:
 
         # Configuración de PostgreSQL
         self.db_config = {
-            "host": os.getenv("POSTGRES_HOST", "localhost"),
-            "database": os.getenv("POSTGRES_DB", "news_colcap"),
-            "user": os.getenv("POSTGRES_USER", "newsuser"),
-            "password": os.getenv("POSTGRES_PASSWORD", "newspass123"),
+            "host": os.getenv("POSTGRES_HOST"),
+            "dbname": os.getenv("POSTGRES_DB"),
+            "user": os.getenv("POSTGRES_USER"),
+            "password": os.getenv("POSTGRES_PASSWORD"),
+            "port": 5432,
         }
 
         # Inicializar analizador de sentimientos
@@ -875,8 +877,10 @@ class NewsProcessor:
             )
 
             articles = cursor.fetchall()
-            logger.info(f"🔒 Obtenidos {len(articles)} artículos (con bloqueo distribuido)")
-            
+            logger.info(
+                f"🔒 Obtenidos {len(articles)} artículos (con bloqueo distribuido)"
+            )
+
             # Commit para liberar el bloqueo después de leer
             conn.commit()
             return articles
@@ -889,23 +893,25 @@ class NewsProcessor:
         """Actualizar múltiples artículos usando BATCH UPDATE para alto rendimiento"""
         if not processed_data_list:
             return 0
-        
+
         conn = self.get_db_connection()
         cursor = conn.cursor()
-        
+
         try:
             # Preparar datos para batch update
             # Usamos un CTE con VALUES para hacer update masivo
             update_data = []
             for data in processed_data_list:
-                update_data.append((
-                    data["id"],
-                    data["sentiment_score"],
-                    data["sentiment_label"],
-                    data["categories"],
-                    data["keywords"]
-                ))
-            
+                update_data.append(
+                    (
+                        data["id"],
+                        data["sentiment_score"],
+                        data["sentiment_label"],
+                        data["categories"],
+                        data["keywords"],
+                    )
+                )
+
             # Batch update usando execute_values con un UPDATE JOIN
             # Primero insertamos en tabla temporal, luego hacemos UPDATE
             execute_values(
@@ -922,9 +928,9 @@ class NewsProcessor:
                 """,
                 update_data,
                 template="(%s, %s, %s, %s::text[], %s::text[])",
-                page_size=100
+                page_size=100,
             )
-            
+
             updated_count = cursor.rowcount
             conn.commit()
             logger.info(f"📦 BATCH UPDATE: {updated_count} artículos actualizados")
@@ -981,8 +987,10 @@ class NewsProcessor:
 
         processed = []
         num_workers = max(4, multiprocessing.cpu_count() * 2)  # Más threads para I/O
-        
-        logger.info(f"⚡ Procesando {len(articles)} artículos con {num_workers} threads...")
+
+        logger.info(
+            f"⚡ Procesando {len(articles)} artículos con {num_workers} threads..."
+        )
 
         # Usar ThreadPoolExecutor en lugar de ProcessPoolExecutor
         # ThreadPool es mejor para operaciones I/O bound y no tiene problemas de serialización
@@ -1006,8 +1014,10 @@ class NewsProcessor:
             self.notify_analyzer()
 
         elapsed = time.time() - start_time
-        logger.info(f"✅ Procesados {len(processed)}/{len(articles)} artículos en {elapsed:.2f}s")
-        
+        logger.info(
+            f"✅ Procesados {len(processed)}/{len(articles)} artículos en {elapsed:.2f}s"
+        )
+
         return len(processed)
 
     def notify_analyzer(self):
