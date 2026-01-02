@@ -1,6 +1,7 @@
 """
 Analysis Service
 Analiza correlaciones entre noticias y el índice COLCAP
+Con ThreadPoolExecutor para operaciones I/O paralelas
 """
 
 import os
@@ -9,9 +10,10 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import redis
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -94,7 +96,7 @@ class COLCAPAnalyzer:
             return pd.DataFrame()
     
     def save_colcap_data(self, df: pd.DataFrame):
-        """Guardar datos del COLCAP en la base de datos"""
+        """Guardar datos del COLCAP en la base de datos usando BATCH INSERT"""
         if df.empty:
             logger.warning("DataFrame vacío, no hay datos COLCAP para guardar")
             return
@@ -102,27 +104,16 @@ class COLCAPAnalyzer:
         conn = self.get_db_connection()
         cursor = conn.cursor()
         
-        saved_count = 0
-        
         try:
+            # Preparar datos para batch insert
+            batch_data = []
             for idx, row in df.iterrows():
                 try:
-                    # La columna 'Date' ahora es una columna normal después del reset_index
                     date_val = row['Date']
                     if isinstance(date_val, pd.Timestamp):
                         date_val = date_val.date()
                     
-                    cursor.execute("""
-                        INSERT INTO colcap_data 
-                        (date, open_price, high_price, low_price, close_price, 
-                         volume, adj_close, daily_change)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (date) 
-                        DO UPDATE SET
-                            close_price = EXCLUDED.close_price,
-                            daily_change = EXCLUDED.daily_change,
-                            volume = EXCLUDED.volume
-                    """, (
+                    batch_data.append((
                         date_val,
                         float(row['Open']) if not pd.isna(row['Open']) else None,
                         float(row['High']) if not pd.isna(row['High']) else None,
@@ -132,13 +123,34 @@ class COLCAPAnalyzer:
                         float(row['Close']) if not pd.isna(row['Close']) else None,
                         float(row['Daily_Change']) if not pd.isna(row['Daily_Change']) else 0.0
                     ))
-                    saved_count += 1
                 except Exception as e:
-                    logger.error(f"Error guardando fecha {idx}: {str(e)}")
+                    logger.error(f"Error preparando fecha {idx}: {str(e)}")
                     continue
             
+            if not batch_data:
+                return
+            
+            # BATCH UPSERT usando execute_values
+            execute_values(
+                cursor,
+                """
+                INSERT INTO colcap_data 
+                (date, open_price, high_price, low_price, close_price, 
+                 volume, adj_close, daily_change)
+                VALUES %s
+                ON CONFLICT (date) 
+                DO UPDATE SET
+                    close_price = EXCLUDED.close_price,
+                    daily_change = EXCLUDED.daily_change,
+                    volume = EXCLUDED.volume
+                """,
+                batch_data,
+                template="(%s, %s, %s, %s, %s, %s, %s, %s)",
+                page_size=100
+            )
+            
             conn.commit()
-            logger.info(f"✅ Guardados/actualizados {saved_count} registros COLCAP")
+            logger.info(f"✅ BATCH guardados/actualizados {len(batch_data)} registros COLCAP")
             
         except Exception as e:
             conn.rollback()
@@ -237,7 +249,7 @@ class COLCAPAnalyzer:
         return stats_dict
     
     def save_correlations(self, news_df: pd.DataFrame, colcap_df: pd.DataFrame):
-        """Guardar correlaciones diarias en la base de datos"""
+        """Guardar correlaciones diarias en la base de datos usando BATCH INSERT"""
         conn = self.get_db_connection()
         cursor = conn.cursor()
         
@@ -251,7 +263,8 @@ class COLCAPAnalyzer:
                 how='inner'
             )
             
-            saved_count = 0
+            # Preparar datos para batch insert
+            batch_data = []
             
             for date, row in merged.iterrows():
                 # Calcular correlación móvil de 7 días
@@ -266,17 +279,7 @@ class COLCAPAnalyzer:
                     corr = 0.0
                 
                 try:
-                    cursor.execute("""
-                        INSERT INTO correlations 
-                        (date, news_count, avg_sentiment, colcap_change, 
-                         correlation_coefficient, news_ids)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (date) DO UPDATE SET
-                            news_count = EXCLUDED.news_count,
-                            avg_sentiment = EXCLUDED.avg_sentiment,
-                            colcap_change = EXCLUDED.colcap_change,
-                            correlation_coefficient = EXCLUDED.correlation_coefficient
-                    """, (
+                    batch_data.append((
                         date.date(),
                         int(row['news_count']),
                         float(row['avg_sentiment']),
@@ -284,13 +287,34 @@ class COLCAPAnalyzer:
                         float(corr),
                         list(row['news_ids'])
                     ))
-                    saved_count += 1
                 except Exception as e:
-                    logger.error(f"Error guardando correlación para {date}: {str(e)}")
+                    logger.error(f"Error preparando correlación para {date}: {str(e)}")
                     continue
             
+            if not batch_data:
+                return
+            
+            # BATCH UPSERT usando execute_values
+            execute_values(
+                cursor,
+                """
+                INSERT INTO correlations 
+                (date, news_count, avg_sentiment, colcap_change, 
+                 correlation_coefficient, news_ids)
+                VALUES %s
+                ON CONFLICT (date) DO UPDATE SET
+                    news_count = EXCLUDED.news_count,
+                    avg_sentiment = EXCLUDED.avg_sentiment,
+                    colcap_change = EXCLUDED.colcap_change,
+                    correlation_coefficient = EXCLUDED.correlation_coefficient
+                """,
+                batch_data,
+                template="(%s, %s, %s, %s, %s, %s)",
+                page_size=100
+            )
+            
             conn.commit()
-            logger.info(f"Guardadas {saved_count} correlaciones")
+            logger.info(f"✅ BATCH guardadas {len(batch_data)} correlaciones")
             
         except Exception as e:
             conn.rollback()
@@ -346,35 +370,54 @@ class COLCAPAnalyzer:
             conn.close()
     
     def run_analysis(self):
-        """Ejecutar análisis completo"""
+        """Ejecutar análisis completo con ThreadPoolExecutor para I/O paralelo"""
         logger.info("=" * 50)
-        logger.info("Iniciando análisis de correlación")
+        logger.info("Iniciando análisis de correlación (PARALELO)")
         logger.info("=" * 50)
         
-        # 1. Intentar obtener datos COLCAP de Yahoo Finance (todo el año)
-        colcap_df = self.fetch_colcap_data(days_back=365)
-        if not colcap_df.empty:
-            logger.info("Datos COLCAP obtenidos de Yahoo Finance")
-            self.save_colcap_data(colcap_df)
-        else:
-            # Si falla, usar datos existentes en la BD (todo el año)
+        start_time = time.time()
+        
+        # 1. Usar ThreadPoolExecutor para operaciones I/O en paralelo
+        # Fetch COLCAP y News sentiment simultáneamente
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Lanzar tareas I/O en paralelo
+            future_colcap = executor.submit(self.fetch_colcap_data, 365)
+            future_news = executor.submit(self.get_daily_news_sentiment, 365)
+            future_colcap_db = executor.submit(self.get_colcap_from_db, 365)
+            
+            # Recoger resultados
+            colcap_df = future_colcap.result()
+            news_df = future_news.result()
+            colcap_db_df = future_colcap_db.result()
+        
+        logger.info(f"⚡ Fetch paralelo completado en {time.time() - start_time:.2f}s")
+        
+        # Usar datos de Yahoo Finance, o BD como fallback
+        if colcap_df.empty:
             logger.warning("No se pudo descargar de Yahoo Finance, usando datos de BD")
-            colcap_df = self.get_colcap_from_db(days_back=365)
+            colcap_df = colcap_db_df
             
             if colcap_df.empty:
                 logger.error("No hay datos del COLCAP (ni en Yahoo ni en BD)")
                 return
+        else:
+            # Guardar datos nuevos de Yahoo Finance
+            self.save_colcap_data(colcap_df)
         
-        # 2. Obtener sentimiento de noticias (todos los días disponibles)
-        news_df = self.get_daily_news_sentiment(days_back=365)
+        # 2. Verificar datos de noticias
         if news_df.empty:
             logger.warning("No hay datos de noticias para analizar")
             return
         
         logger.info(f"Datos para análisis: {len(news_df)} días de noticias, {len(colcap_df)} días COLCAP")
         
-        # 3. Calcular correlación general
-        correlation_stats = self.calculate_correlation(news_df, colcap_df)
+        # 3. Calcular correlación y guardar en paralelo
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_corr = executor.submit(self.calculate_correlation, news_df, colcap_df)
+            future_save = executor.submit(self.save_correlations, news_df, colcap_df)
+            
+            correlation_stats = future_corr.result()
+            future_save.result()  # Esperar que termine
         
         if correlation_stats:
             # Guardar en Redis para la API
@@ -385,10 +428,8 @@ class COLCAPAnalyzer:
             )
             logger.info("✅ Estadísticas de correlación guardadas en Redis")
         
-        # 4. Guardar correlaciones diarias
-        self.save_correlations(news_df, colcap_df)
-        
-        logger.info("✅ Análisis completado exitosamente")
+        elapsed = time.time() - start_time
+        logger.info(f"✅ Análisis completado exitosamente en {elapsed:.2f}s (PARALELO)")
         logger.info("=" * 50)
     
     def run(self):

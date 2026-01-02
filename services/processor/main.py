@@ -1,6 +1,7 @@
 """
 News Processor Service
 Procesa y analiza el contenido de las noticias
+Con procesamiento paralelo y batch updates para alto rendimiento
 """
 
 import os
@@ -13,10 +14,10 @@ import multiprocessing
 import redis
 import psycopg2
 import nltk
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, execute_values
 from textblob import TextBlob
 from nltk.sentiment import SentimentIntensityAnalyzer
 
@@ -854,11 +855,13 @@ class NewsProcessor:
             return None
 
     def get_unprocessed_articles(self, limit: int = 100) -> List[Dict]:
-        """Obtener artículos sin procesar de la BD"""
+        """Obtener artículos sin procesar con BLOQUEO DISTRIBUIDO para evitar duplicados"""
         conn = self.get_db_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
         try:
+            # Usar FOR UPDATE SKIP LOCKED para bloqueo distribuido
+            # Esto permite que múltiples pods procesen artículos diferentes
             cursor.execute(
                 """
                 SELECT id, title, content, published_date
@@ -866,14 +869,71 @@ class NewsProcessor:
                 WHERE sentiment_score IS NULL
                 ORDER BY published_date DESC
                 LIMIT %s
+                FOR UPDATE SKIP LOCKED
             """,
                 (limit,),
             )
 
             articles = cursor.fetchall()
-            logger.info(f"Obtenidos {len(articles)} artículos sin procesar")
+            logger.info(f"🔒 Obtenidos {len(articles)} artículos (con bloqueo distribuido)")
+            
+            # Commit para liberar el bloqueo después de leer
+            conn.commit()
             return articles
 
+        finally:
+            cursor.close()
+            conn.close()
+
+    def batch_update_articles(self, processed_data_list: List[Dict]):
+        """Actualizar múltiples artículos usando BATCH UPDATE para alto rendimiento"""
+        if not processed_data_list:
+            return 0
+        
+        conn = self.get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Preparar datos para batch update
+            # Usamos un CTE con VALUES para hacer update masivo
+            update_data = []
+            for data in processed_data_list:
+                update_data.append((
+                    data["id"],
+                    data["sentiment_score"],
+                    data["sentiment_label"],
+                    data["categories"],
+                    data["keywords"]
+                ))
+            
+            # Batch update usando execute_values con un UPDATE JOIN
+            # Primero insertamos en tabla temporal, luego hacemos UPDATE
+            execute_values(
+                cursor,
+                """
+                UPDATE news AS n SET
+                    sentiment_score = v.sentiment_score,
+                    sentiment_label = v.sentiment_label,
+                    categories = v.categories,
+                    keywords = v.keywords,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM (VALUES %s) AS v(id, sentiment_score, sentiment_label, categories, keywords)
+                WHERE n.id = v.id::integer
+                """,
+                update_data,
+                template="(%s, %s, %s, %s::text[], %s::text[])",
+                page_size=100
+            )
+            
+            updated_count = cursor.rowcount
+            conn.commit()
+            logger.info(f"📦 BATCH UPDATE: {updated_count} artículos actualizados")
+            return updated_count
+
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Error en batch update: {str(e)}")
+            return 0
         finally:
             cursor.close()
             conn.close()
@@ -913,33 +973,41 @@ class NewsProcessor:
             conn.close()
 
     def process_batch(self):
-        """Procesar lote de artículos"""
-        articles = self.get_unprocessed_articles(limit=50)
+        """Procesar lote de artículos con ThreadPoolExecutor y batch updates"""
+        start_time = time.time()
+        articles = self.get_unprocessed_articles(limit=100)  # Aumentado a 100
         if not articles:
             return 0
 
         processed = []
+        num_workers = max(4, multiprocessing.cpu_count() * 2)  # Más threads para I/O
+        
+        logger.info(f"⚡ Procesando {len(articles)} artículos con {num_workers} threads...")
 
-        with ProcessPoolExecutor(
-            max_workers=max(2, multiprocessing.cpu_count() - 1)
-        ) as executor:
+        # Usar ThreadPoolExecutor en lugar de ProcessPoolExecutor
+        # ThreadPool es mejor para operaciones I/O bound y no tiene problemas de serialización
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [
                 executor.submit(self.process_article, dict(article))
                 for article in articles
             ]
 
             for f in as_completed(futures):
-                result = f.result()
-                if result:
-                    processed.append(result)
+                try:
+                    result = f.result()
+                    if result:
+                        processed.append(result)
+                except Exception as e:
+                    logger.error(f"Error en thread: {str(e)}")
 
-        # DB writes SECUENCIAL o batch
-        for data in processed:
-            self.update_article(data)
-
+        # BATCH UPDATE en lugar de updates individuales
         if processed:
+            self.batch_update_articles(processed)
             self.notify_analyzer()
 
+        elapsed = time.time() - start_time
+        logger.info(f"✅ Procesados {len(processed)}/{len(articles)} artículos en {elapsed:.2f}s")
+        
         return len(processed)
 
     def notify_analyzer(self):

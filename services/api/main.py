@@ -1,18 +1,20 @@
 """
 API and Dashboard Service
 Proporciona endpoints REST y dashboard web
+Con métricas Prometheus para observabilidad
 """
 
 import os
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 import redis
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,6 +22,25 @@ from pydantic import BaseModel
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# ============= MÉTRICAS PROMETHEUS =============
+# Contadores y gauges para métricas del sistema
+class PrometheusMetrics:
+    """Clase para manejar métricas en formato Prometheus"""
+    def __init__(self):
+        self.request_count = 0
+        self.request_latency_sum = 0.0
+        self.last_collection_time = None
+        self.last_processing_time = None
+        self.last_analysis_time = None
+    
+    def increment_requests(self):
+        self.request_count += 1
+    
+    def add_latency(self, latency: float):
+        self.request_latency_sum += latency
+
+metrics = PrometheusMetrics()
 
 # Inicializar FastAPI
 app = FastAPI(
@@ -643,6 +664,126 @@ async def get_metrics():
             "redis_connected": redis_client.ping(),
             "timestamp": datetime.utcnow().isoformat()
         }
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_metrics():
+    """
+    Endpoint de métricas en formato Prometheus
+    Expone métricas para scraping por Prometheus
+    """
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+    
+    try:
+        # Total de noticias
+        cursor.execute("SELECT COUNT(*) as total FROM news")
+        total_news = cursor.fetchone()['total']
+        
+        # Noticias procesadas (con sentimiento)
+        cursor.execute("SELECT COUNT(*) as total FROM news WHERE sentiment_score IS NOT NULL")
+        processed_news = cursor.fetchone()['total']
+        
+        # Noticias pendientes
+        pending_news = total_news - processed_news
+        
+        # Distribución de sentimiento
+        cursor.execute("""
+            SELECT 
+                COUNT(CASE WHEN sentiment_label = 'positive' THEN 1 END) as positive,
+                COUNT(CASE WHEN sentiment_label = 'negative' THEN 1 END) as negative,
+                COUNT(CASE WHEN sentiment_label = 'neutral' THEN 1 END) as neutral
+            FROM news WHERE sentiment_label IS NOT NULL
+        """)
+        sentiment = cursor.fetchone()
+        
+        # Datos COLCAP
+        cursor.execute("SELECT COUNT(*) as total FROM colcap_data")
+        colcap_days = cursor.fetchone()['total']
+        
+        # Correlaciones
+        cursor.execute("SELECT COUNT(*) as total FROM correlations")
+        correlations = cursor.fetchone()['total']
+        
+        # Último precio COLCAP
+        cursor.execute("SELECT close_price, daily_change FROM colcap_data ORDER BY date DESC LIMIT 1")
+        colcap_latest = cursor.fetchone()
+        
+        # Sentimiento promedio
+        cursor.execute("SELECT AVG(sentiment_score) as avg FROM news WHERE sentiment_score IS NOT NULL")
+        avg_sentiment = cursor.fetchone()['avg'] or 0.0
+        
+        # Verificar Redis
+        try:
+            redis_client.ping()
+            redis_up = 1
+        except:
+            redis_up = 0
+        
+        # Generar métricas en formato Prometheus
+        prometheus_output = f"""# HELP news_colcap_news_total Total number of news articles collected
+# TYPE news_colcap_news_total gauge
+news_colcap_news_total {total_news}
+
+# HELP news_colcap_news_processed Number of news articles with sentiment analysis
+# TYPE news_colcap_news_processed gauge
+news_colcap_news_processed {processed_news}
+
+# HELP news_colcap_news_pending Number of news articles pending processing
+# TYPE news_colcap_news_pending gauge
+news_colcap_news_pending {pending_news}
+
+# HELP news_colcap_sentiment_positive Number of positive sentiment articles
+# TYPE news_colcap_sentiment_positive gauge
+news_colcap_sentiment_positive {sentiment['positive'] or 0}
+
+# HELP news_colcap_sentiment_negative Number of negative sentiment articles
+# TYPE news_colcap_sentiment_negative gauge
+news_colcap_sentiment_negative {sentiment['negative'] or 0}
+
+# HELP news_colcap_sentiment_neutral Number of neutral sentiment articles
+# TYPE news_colcap_sentiment_neutral gauge
+news_colcap_sentiment_neutral {sentiment['neutral'] or 0}
+
+# HELP news_colcap_sentiment_average Average sentiment score
+# TYPE news_colcap_sentiment_average gauge
+news_colcap_sentiment_average {float(avg_sentiment):.4f}
+
+# HELP news_colcap_colcap_days Total days of COLCAP data
+# TYPE news_colcap_colcap_days gauge
+news_colcap_colcap_days {colcap_days}
+
+# HELP news_colcap_correlations_total Total correlation records
+# TYPE news_colcap_correlations_total gauge
+news_colcap_correlations_total {correlations}
+
+# HELP news_colcap_colcap_price Latest COLCAP closing price
+# TYPE news_colcap_colcap_price gauge
+news_colcap_colcap_price {float(colcap_latest['close_price']) if colcap_latest else 0}
+
+# HELP news_colcap_colcap_change Latest COLCAP daily change percentage
+# TYPE news_colcap_colcap_change gauge
+news_colcap_colcap_change {float(colcap_latest['daily_change']) if colcap_latest else 0}
+
+# HELP news_colcap_redis_up Redis connection status (1=up, 0=down)
+# TYPE news_colcap_redis_up gauge
+news_colcap_redis_up {redis_up}
+
+# HELP news_colcap_api_requests_total Total API requests (approximate)
+# TYPE news_colcap_api_requests_total counter
+news_colcap_api_requests_total {metrics.request_count}
+
+# HELP news_colcap_info System information
+# TYPE news_colcap_info gauge
+news_colcap_info{{version="1.0.0",service="api"}} 1
+"""
+        
+        metrics.increment_requests()
+        return prometheus_output
+        
     finally:
         cursor.close()
         conn.close()

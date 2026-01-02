@@ -1,4 +1,4 @@
-# Processor Service Deployment
+# Processor Service Deployment - Procesamiento Paralelo Distribuido
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,7 +7,7 @@ metadata:
   labels:
     app: processor
 spec:
-  replicas: 2  # Procesamiento paralelo
+  replicas: 3  # Múltiples réplicas para procesamiento paralelo distribuido
   selector:
     matchLabels:
       app: processor
@@ -15,26 +15,37 @@ spec:
     metadata:
       labels:
         app: processor
+      annotations:
+        # Anotación para Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
     spec:
       containers:
       - name: processor
-        image: newscolcap/processor:latest  # Cambiar por tu imagen
+        image: newscolcap/processor:latest
         imagePullPolicy: IfNotPresent
         envFrom:
         - configMapRef:
             name: news-config
         - secretRef:
             name: news-secrets
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PROCESSOR_BATCH_SIZE
+          value: "100"
         resources:
           requests:
             memory: "512Mi"
             cpu: "300m"
           limits:
             memory: "1Gi"
-            cpu: "700m"
+            cpu: "800m"
       restartPolicy: Always
 ---
-# HorizontalPodAutoscaler para escalar automáticamente
+# HorizontalPodAutoscaler para escalar automáticamente basado en CPU/memoria
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -46,17 +57,42 @@ spec:
     kind: Deployment
     name: processor
   minReplicas: 2
-  maxReplicas: 5
+  maxReplicas: 6
   metrics:
   - type: Resource
     resource:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70
+        averageUtilization: 60
   - type: Resource
     resource:
       name: memory
       target:
         type: Utilization
-        averageUtilization: 80
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+---
+# PodDisruptionBudget para alta disponibilidad
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: processor-pdb
+  namespace: news-colcap
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: processor

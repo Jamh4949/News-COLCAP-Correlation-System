@@ -1,4 +1,4 @@
-# API Service Deployment y Service
+# API Service Deployment y Service - Con métricas Prometheus
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,13 +15,19 @@ spec:
     metadata:
       labels:
         app: api
+      annotations:
+        # Habilitar scraping por Prometheus
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
       - name: api
-        image: newscolcap/api:latest  # Cambiar por tu imagen
+        image: newscolcap/api:latest
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8000
+          name: http
         envFrom:
         - configMapRef:
             name: news-config
@@ -40,12 +46,14 @@ spec:
             port: 8000
           initialDelaySeconds: 30
           periodSeconds: 10
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /api/health
             port: 8000
           initialDelaySeconds: 10
           periodSeconds: 5
+          failureThreshold: 3
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -53,6 +61,12 @@ kind: Service
 metadata:
   name: api-service
   namespace: news-colcap
+  labels:
+    app: api
+  annotations:
+    # Anotación para ServiceMonitor de Prometheus
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
 spec:
   selector:
     app: api
@@ -60,7 +74,8 @@ spec:
   - port: 8000
     targetPort: 8000
     protocol: TCP
-  type: LoadBalancer  # Para Oracle Cloud, cambiará a NodePort si no hay LB
+    name: http
+  type: LoadBalancer
 ---
 # HorizontalPodAutoscaler para la API
 apiVersion: autoscaling/v2
@@ -74,11 +89,30 @@ spec:
     kind: Deployment
     name: api
   minReplicas: 2
-  maxReplicas: 4
+  maxReplicas: 5
   metrics:
   - type: Resource
     resource:
       name: cpu
       target:
         type: Utilization
-        averageUtilization: 70
+        averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+---
+# PodDisruptionBudget para alta disponibilidad
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-pdb
+  namespace: news-colcap
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: api

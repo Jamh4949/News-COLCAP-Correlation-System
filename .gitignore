@@ -68,3 +68,14 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+# Archivos personales/innecesarios
+informe_final.tex
+EC2-DEPLOYMENT.md
+test_parallel_processing.py
+*.aux
+*.log
+*.toc
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz

@@ -1,4 +1,4 @@
-# Analyzer Service Deployment
+# Analyzer Service Deployment - Con ThreadPoolExecutor
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,21 +15,63 @@ spec:
     metadata:
       labels:
         app: analyzer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
     spec:
       containers:
       - name: analyzer
-        image: newscolcap/analyzer:latest  # Cambiar por tu imagen
+        image: newscolcap/analyzer:latest
         imagePullPolicy: IfNotPresent
         envFrom:
         - configMapRef:
             name: news-config
         - secretRef:
             name: news-secrets
+        env:
+        - name: ANALYZER_THREAD_WORKERS
+          value: "4"
+        - name: ANALYSIS_INTERVAL
+          value: "43200"  # 12 horas
         resources:
           requests:
             memory: "512Mi"
             cpu: "300m"
           limits:
             memory: "1Gi"
-            cpu: "700m"
+            cpu: "800m"
       restartPolicy: Always
+---
+# CronJob para análisis programado (complementario al loop interno)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: analyzer-cron
+  namespace: news-colcap
+spec:
+  schedule: "0 */6 * * *"  # Cada 6 horas
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: analyzer
+            image: newscolcap/analyzer:latest
+            imagePullPolicy: IfNotPresent
+            command: ["python", "-c", "from main import COLCAPAnalyzer; a = COLCAPAnalyzer(); a.run_analysis()"]
+            envFrom:
+            - configMapRef:
+                name: news-config
+            - secretRef:
+                name: news-secrets
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+          restartPolicy: OnFailure

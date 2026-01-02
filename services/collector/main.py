@@ -143,6 +143,7 @@ class GDELTCollector:
         return result
     
     def save_to_database(self, articles: List[Dict]):
+        """Guardar artículos en BD usando BATCH INSERT para alto rendimiento"""
         if not articles:
             return 0
         
@@ -151,18 +152,15 @@ class GDELTCollector:
         saved = 0
         
         try:
+            # Preparar datos para batch insert
+            batch_data = []
             for article in articles:
                 try:
                     pub_date = datetime.strptime(
                         article.get('seendate', datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')),
                         '%Y%m%dT%H%M%SZ'
                     )
-                    
-                    cursor.execute("""
-                        INSERT INTO news (url, title, content, source, published_date, country)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (url) DO NOTHING
-                    """, (
+                    batch_data.append((
                         article.get('url', ''),
                         article.get('title', ''),
                         article.get('title', ''),
@@ -170,17 +168,41 @@ class GDELTCollector:
                         pub_date,
                         'CO'
                     ))
-                    
-                    if cursor.rowcount > 0:
-                        saved += 1
                 except:
                     continue
             
+            if not batch_data:
+                return 0
+            
+            # BATCH INSERT usando execute_values para alto rendimiento
+            from psycopg2.extras import execute_values
+            
+            # Procesar en chunks de 500 para evitar memory issues
+            BATCH_SIZE = 500
+            for i in range(0, len(batch_data), BATCH_SIZE):
+                chunk = batch_data[i:i + BATCH_SIZE]
+                
+                execute_values(
+                    cursor,
+                    """
+                    INSERT INTO news (url, title, content, source, published_date, country)
+                    VALUES %s
+                    ON CONFLICT (url) DO NOTHING
+                    """,
+                    chunk,
+                    template="(%s, %s, %s, %s, %s, %s)",
+                    page_size=BATCH_SIZE
+                )
+                saved += cursor.rowcount
+                
+                logger.info(f"  📦 Batch {i//BATCH_SIZE + 1}: {cursor.rowcount} insertados")
+            
             conn.commit()
-            logger.info(f"💾 Guardados: {saved}")
+            logger.info(f"💾 BATCH INSERT completado: {saved}/{len(batch_data)} guardados")
+            
         except Exception as e:
             conn.rollback()
-            logger.error(f"Error BD: {e}")
+            logger.error(f"Error BD batch insert: {e}")
         finally:
             cursor.close()
             conn.close()

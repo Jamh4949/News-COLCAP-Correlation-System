@@ -1,0 +1,128 @@
+# Job de Kubernetes para Procesamiento Paralelo Batch
+# Este Job demuestra la capacidad de procesamiento distribuido del sistema
+# Ejecuta múltiples workers en paralelo para procesar noticias
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: news-batch-processor
+  namespace: news-colcap
+  labels:
+    app: batch-processor
+    type: parallel-processing
+spec:
+  # Completions: Número total de pods que deben completarse
+  completions: 5
+  # Parallelism: Número de pods ejecutándose simultáneamente
+  parallelism: 3
+  # TTL para limpiar jobs completados
+  ttlSecondsAfterFinished: 3600
+  # Reintentos en caso de fallo
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: batch-processor
+    spec:
+      containers:
+      - name: processor
+        image: newscolcap/processor:latest
+        imagePullPolicy: IfNotPresent
+        command: ["python", "-c"]
+        args:
+        - |
+          import os
+          import time
+          from main import NewsProcessor
+          
+          # Identificador del pod para logging
+          pod_name = os.getenv('POD_NAME', 'unknown')
+          job_index = os.getenv('JOB_COMPLETION_INDEX', '0')
+          
+          print(f"🚀 Worker {pod_name} (index {job_index}) iniciando...")
+          
+          processor = NewsProcessor()
+          
+          # Procesar múltiples batches
+          total_processed = 0
+          for batch in range(5):
+              processed = processor.process_batch()
+              total_processed += processed
+              print(f"📦 Batch {batch+1}/5 completado: {processed} artículos")
+              time.sleep(2)  # Pequeña pausa entre batches
+          
+          print(f"✅ Worker {pod_name} completado. Total procesados: {total_processed}")
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: JOB_COMPLETION_INDEX
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+        envFrom:
+        - configMapRef:
+            name: news-config
+        - secretRef:
+            name: news-secrets
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      restartPolicy: OnFailure
+---
+# CronJob para ejecutar procesamiento batch periódicamente
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: news-batch-cron
+  namespace: news-colcap
+spec:
+  # Ejecutar cada 2 horas
+  schedule: "0 */2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      parallelism: 2
+      completions: 2
+      template:
+        spec:
+          containers:
+          - name: processor
+            image: newscolcap/processor:latest
+            imagePullPolicy: IfNotPresent
+            command: ["python", "-c"]
+            args:
+            - |
+              from main import NewsProcessor
+              import time
+              
+              processor = NewsProcessor()
+              
+              for i in range(10):
+                  processed = processor.process_batch()
+                  if processed == 0:
+                      break
+                  print(f"Batch {i+1}: {processed} artículos procesados")
+                  time.sleep(1)
+              
+              print("✅ Procesamiento batch completado")
+            envFrom:
+            - configMapRef:
+                name: news-config
+            - secretRef:
+                name: news-secrets
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "512Mi"
+                cpu: "400m"
+          restartPolicy: OnFailure
