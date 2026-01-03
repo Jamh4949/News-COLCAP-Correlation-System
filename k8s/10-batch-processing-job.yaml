@@ -1,7 +1,4 @@
-# Job de Kubernetes para Procesamiento Paralelo Batch
-# Este Job demuestra la capacidad de procesamiento distribuido del sistema
-# Ejecuta múltiples workers en paralelo para procesar noticias
-
+# Job de Kubernetes para Procesamiento Paralelo
 apiVersion: batch/v1
 kind: Job
 metadata:

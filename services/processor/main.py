@@ -11,7 +11,8 @@ import unicodedata
 import multiprocessing
 import redis
 import psycopg2
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import nltk
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import List, Dict, Tuple
 from psycopg2.extras import RealDictCursor, execute_values
@@ -919,10 +920,7 @@ class NewsProcessor:
 
         processed = []
 
-        with ProcessPoolExecutor(
-            max_workers=max(2, multiprocessing.cpu_count() - 1)
-        ) as executor:
-            # Enviar trabajos al pool
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = [
                 executor.submit(self.process_article, dict(article))
                 for article in articles
@@ -934,56 +932,9 @@ class NewsProcessor:
                 if result:
                     processed.append(result)
 
-        if not processed:
-            return 0
-
-        conn = self.get_db_connection()
-        cursor = conn.cursor()
-
-        try:
-            rows = [
-                (
-                    p["sentiment_score"],
-                    p["sentiment_label"],
-                    p["categories"],
-                    p["keywords"],
-                    p["id"],
-                )
-                for p in processed
-            ]
-
-            query = """
-                UPDATE news AS n SET
-                    sentiment_score = v.sentiment_score,
-                    sentiment_label = v.sentiment_label,
-                    categories = v.categories,
-                    keywords = v.keywords,
-                    updated_at = CURRENT_TIMESTAMP
-                FROM (
-                    VALUES %s
-                ) AS v(
-                    sentiment_score,
-                    sentiment_label,
-                    categories,
-                    keywords,
-                    id
-                )
-                WHERE n.id = v.id
-            """
-
-            execute_values(cursor, query, rows, page_size=100)
-
-            conn.commit()
-
-        except Exception as e:
-            conn.rollback()
-            logger.error(f"Error en batch update: {str(e)}")
-
-        finally:
-            cursor.close()
-            conn.close()
-
-        self.notify_analyzer()
+        if processed:
+            self.batch_update_articles(processed)
+            self.notify_analyzer()
 
         return len(processed)
 

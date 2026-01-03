@@ -1,4 +1,4 @@
-# Analyzer Service Deployment - Con ThreadPoolExecutor
+# Analyzer Service Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,7 +42,7 @@ spec:
             cpu: "800m"
       restartPolicy: Always
 ---
-# CronJob para análisis programado (complementario al loop interno)
+# CronJob para análisis programado
 apiVersion: batch/v1
 kind: CronJob
 metadata:

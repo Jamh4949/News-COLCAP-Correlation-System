@@ -1,5 +1,3 @@
--- Database initialization script for News-COLCAP System
-
 -- Create news table
 CREATE TABLE IF NOT EXISTS news (
     id SERIAL PRIMARY KEY,

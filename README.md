@@ -6,68 +6,137 @@ Sistema distribuido para analizar correlaciones entre noticias y el índice burs
 
 ```
 ├── services/
-│   ├── collector/          # Servicio recolector de noticias GDELT
-│   ├── processor/          # Servicio de procesamiento ETL
-│   ├── analyzer/           # Servicio de análisis y correlación
-│   └── api/                # API REST y Dashboard
+│   ├── collector/          # Servicio recolector GDELT
+│   ├── processor/          # Servicio ETL
+│   ├── analyzer/           # Servicio análisis
+│   └── api/                # API REST + Dashboard + Prometheus
 ├── k8s/                    # Manifiestos de Kubernetes
 ├── database/               # Scripts de base de datos
-├── local-scripts/          # Scripts de desarrollo y pruebas
-├── scripts/                # Scripts de despliegue AWS/EKS
-├── data/                   # Datos generados (COLCAP, conclusiones)
+├── scripts/                # Scripts de despliegue
+├── data/                   # Datos de referencia COLCAP
 ├── docker-compose.yml      # Para desarrollo local
-├── LICENSE                 # Licencia dual
 └── README.md
 ```
 
 ## Instalación y Uso
 
 ### Prerrequisitos
-- Docker y Docker Compose
-- Python 3.11+
-- kubectl
-- AWS CLI (para deployment en cloud)
-- eksctl (para EKS)
+- **Docker Desktop**
+- **Minikube**
+- **kubectl**
 
-### Desarrollo Local con Docker (Recomendado)
+---
+
+## Ejecución
+
+### Paso 1: Clonar el repositorio
 ```powershell
-# Clonar repositorio
-git clone <repo-url>
-
-# Opción 1: Script automático (RECOMENDADO)
-.\ejecutar_noticias_docker.ps1
-
-# Opción 2: Manual
-docker-compose up -d
-
-# Acceder al dashboard
-http://localhost:8000
+git clone -b final_ver https://github.com/Jamh4949/News-COLCAP-Correlation-System.git
+cd News-COLCAP-Correlation-System
 ```
 
-### Desarrollo Local sin Docker
+### Paso 2: Iniciar Minikube
 ```powershell
-# Requiere PostgreSQL y Redis locales
-python .\ejecutar_noticias_local.py
+minikube start --memory=4096 --cpus=2
 ```
 
-## Servicios
+### Paso 3: Configurar Docker para usar el de Minikube
+```powershell
+# Esto hace que las imágenes se construyan dentro de Minikube
+minikube docker-env --shell powershell | Invoke-Expression
+```
 
-### 1. Collector Service
-- Recolecta noticias de GDELT
-- Filtra noticias relacionadas con Colombia
+### Paso 4: Construir las imágenes
+```powershell
+docker build -t newscolcap/collector:latest ./services/collector
+docker build -t newscolcap/processor:latest ./services/processor
+docker build -t newscolcap/analyzer:latest ./services/analyzer
+docker build -t newscolcap/api:latest ./services/api
+```
 
-### 2. Processor Service
-- Limpia y transforma datos
-- Realiza análisis de sentimiento
-- Clasifica por categorías
-- Almacena en PostgreSQL
+### Paso 5: Crear el PVC con StorageClass correcto
+```powershell
+# El PVC necesita StorageClass "standard" en Minikube
+@"
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: news-colcap
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+"@ | Set-Content -Path k8s/03-postgres-pvc-minikube.yaml
 
-### 3. Analyzer Service
-- Obtiene datos del COLCAP
-- Calcula correlaciones temporales
-- Genera insights y alertas
+# Aplicar namespace primero
+kubectl apply -f k8s/00-namespace.yaml
 
-### 4. API & Dashboard
-- Endpoints REST para consultas
-- Visualización de correlaciones
-- Métricas del sistema
+# Aplicar PVC para minikube
+kubectl apply -f k8s/03-postgres-pvc-minikube.yaml
+```
+
+### Paso 6: Desplegar todos los servicios
+```powershell
+kubectl apply -f k8s/01-configmap.yaml
+kubectl apply -f k8s/02-secrets.yaml
+kubectl apply -f k8s/04-postgres.yaml
+kubectl apply -f k8s/05-redis.yaml
+kubectl apply -f k8s/06-collector.yaml
+kubectl apply -f k8s/07-processor.yaml
+kubectl apply -f k8s/08-analyzer.yaml
+kubectl apply -f k8s/09-api.yaml
+```
+
+### Paso 7: Verificar que todo está corriendo
+```powershell
+kubectl get pods -n news-colcap
+```
+Deberías ver:
+```
+NAME                         READY   STATUS    
+analyzer-xxx                 1/1     Running
+api-xxx                      1/1     Running
+api-yyy                      1/1     Running   <-- 2 réplicas (HPA)
+collector-xxx                1/1     Running
+postgres-xxx                 1/1     Running
+processor-xxx                1/1     Running
+processor-yyy                1/1     Running
+processor-zzz                1/1     Running   <-- 3 réplicas paralelas
+redis-xxx                    1/1     Running
+```
+
+### Paso 8: Ver HPA y PDB
+```powershell
+# HorizontalPodAutoscaler - escala automáticamente
+kubectl get hpa -n news-colcap
+
+# PodDisruptionBudget - alta disponibilidad
+kubectl get pdb -n news-colcap
+```
+
+### Paso 9: Ver logs de processors paralelos
+```powershell
+kubectl logs -n news-colcap -l app=processor --tail=20
+```
+
+### Paso 10: Acceder al Dashboard
+```powershell
+# En una terminal separada, mantener corriendo:
+kubectl port-forward svc/api-service 8080:8000 -n news-colcap
+
+# Luego abrir en el navegador:
+start http://localhost:8080
+start http://localhost:8080/metrics
+```
+
+### Paso 11: Detener Minikube
+```powershell
+minikube stop
+
+# O eliminar completamente:
+minikube delete
+```

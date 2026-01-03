@@ -378,37 +378,50 @@ class COLCAPAnalyzer:
         logger.info("=" * 50)
         logger.info("Iniciando análisis de correlación")
         logger.info("=" * 50)
-
-        # 1. Intentar obtener datos COLCAP de Yahoo Finance (todo el año)
-        colcap_df = self.fetch_colcap_data(days_back=365)
-        if not colcap_df.empty:
-            logger.info("Datos COLCAP obtenidos de Yahoo Finance")
-            self.save_colcap_data(colcap_df)
-        else:
-            # Si falla, usar datos existentes en la BD (todo el año)
+        
+        start_time = time.time()
+        
+        # Fetch COLCAP y News sentiment simultáneamente
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Lanzar tareas I/O en paralelo
+            future_colcap = executor.submit(self.fetch_colcap_data, 365)
+            future_news = executor.submit(self.get_daily_news_sentiment, 365)
+            future_colcap_db = executor.submit(self.get_colcap_from_db, 365)
+            
+            # Recoger resultados
+            colcap_df = future_colcap.result()
+            news_df = future_news.result()
+            colcap_db_df = future_colcap_db.result()
+        
+        logger.info(f"⚡ Fetch paralelo completado en {time.time() - start_time:.2f}s")
+        
+        # Usar datos de Yahoo Finance, o BD como fallback
+        if colcap_df.empty:
             logger.warning("No se pudo descargar de Yahoo Finance, usando datos de BD")
             colcap_df = self.get_colcap_from_db(days_back=365)
 
             if colcap_df.empty:
                 logger.error("No hay datos del COLCAP (ni en Yahoo ni en BD)")
                 return
-
-        # 2. Obtener sentimiento de noticias (todos los días disponibles)
-        news_df = self.get_daily_news_sentiment(days_back=365)
+        else:
+            # Guardar datos nuevos de Yahoo Finance
+            self.save_colcap_data(colcap_df)
+        
+        # Verificar datos de noticias
         if news_df.empty:
             logger.warning("No hay datos de noticias para analizar")
             return
-
-        # Alinear COLCAP al rango temporal de noticias
-
-        logger.info(
-            f"Datos para análisis (alineados): "
-            f"{len(news_df)} días de noticias, {len(colcap_df)} días COLCAP"
-        )
-
-        # 3. Calcular correlación general
-        correlation_stats = self.calculate_correlation(news_df, colcap_df)
-
+        
+        logger.info(f"Datos para análisis: {len(news_df)} días de noticias, {len(colcap_df)} días COLCAP")
+        
+        # Calcular correlación y guardar en paralelo
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_corr = executor.submit(self.calculate_correlation, news_df, colcap_df)
+            future_save = executor.submit(self.save_correlations, news_df, colcap_df)
+            
+            correlation_stats = future_corr.result()
+            future_save.result()  # Esperar que termine
+        
         if correlation_stats:
             # Guardar en Redis para la API
             self.redis_client.setex(

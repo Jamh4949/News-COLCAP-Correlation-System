@@ -1,4 +1,4 @@
-# API Service Deployment y Service - Con métricas Prometheus
+# API Service Deployment y Service
 apiVersion: apps/v1
 kind: Deployment
 metadata:
